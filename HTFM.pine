@@ -1,0 +1,98 @@
+//@version=5
+// © 2025 Mohammad Rostami. All rights reserved.
+// This script is the intellectual property of Mohammad Rostami.
+// Any redistribution or reproduction of part or all of the contents in any form is prohibited.
+
+indicator("Higher Timeframe Monitor", "HTFM by MR", overlay=true, max_boxes_count=500, max_lines_count=500)
+
+
+// =============================================================================
+// SECTION 1: USER INPUTS & TIMEFRAME CALCULATION
+// =============================================================================
+// This section gets user settings and calculates the group size for candles.
+
+// Timeframe input from the user (in minutes).
+tf = input.int(15, title="Target Timeframe (minutes)", minval=1)
+// Get the current chart timeframe in minutes.
+current_tf = timeframe.in_seconds(timeframe.period) / 60
+// Calculate 'cansize': the number of current bars that make up one higher timeframe bar.
+cansize = int(math.round(tf / current_tf))
+
+// User inputs for candle colors.
+green = input.color(color.green, title="Bullish Candle Color")
+red = input.color(color.red, title="Bearish Candle Color")
+
+
+// =============================================================================
+// SECTION 2: CANDLE VALUES CALCULATION
+// =============================================================================
+// This section calculates the OHLC values for the defined group of candles.
+
+highs = ta.highest(high, cansize)
+lows = ta.lowest(low, cansize)
+opens = open[cansize]
+closes = close
+
+
+// =============================================================================
+// SECTION 3: DRAWING LOGIC
+// =============================================================================
+// This section determines when to draw and then plots the candle body and wicks.
+
+// Check if the current bar is the end of a candle group.
+is_group = (bar_index) % cansize == 0
+
+// If the condition to draw is met, plot the candle.
+if is_group
+    // --- A. Determine color and body coordinates ---
+    growth = closes >= opens ? true : false
+    colors = growth ? green : red
+    top = growth ? closes : opens
+    bottom = growth ? opens : closes
+    left = bar_index[cansize]
+    right = bar_index
+
+    // --- B. Determine wick coordinates ---
+    Ux1 = math.round(math.avg(left, right))
+    Ux2 = Ux1
+    Uy1 = top
+    Uy2 = highs
+
+    Dx1 = Ux1
+    Dx2 = Ux1
+    Dy1 = bottom
+    Dy2 = lows
+
+    // --- C. Draw the candle components ---
+    // Draw the candle body box.
+    box.new(
+         left=left, 
+         top=top, 
+         right=right, 
+         bottom=bottom, 
+         bgcolor=color.new(colors, 70), 
+         border_color=colors,
+         border_width=1
+     )
+    
+    // Draw the upper wick if necessary.
+    if highs > top
+        line.new(
+             x1=Ux1, 
+             y1=Uy1, 
+             x2=Ux2, 
+             y2=Uy2, 
+             color=colors, 
+             width=1
+         )
+    
+    // Draw the lower wick if necessary.
+    if lows < bottom
+        line.new(
+             x1=Dx1, 
+             y1=Dy1, 
+             x2=Dx2, 
+             y2=Dy2, 
+             color=colors, 
+             width=1
+         )
