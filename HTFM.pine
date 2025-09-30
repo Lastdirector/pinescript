@@ -5,34 +5,61 @@
 
 indicator("Higher Timeframe Monitor", "HTFM by MR", overlay=true, max_boxes_count=500, max_lines_count=500)
 
-
 // =============================================================================
 // SECTION 1: USER INPUTS & TIMEFRAME CALCULATION
 // =============================================================================
 // This section gets user settings and calculates the group size for candles.
 
-// Timeframe input from the user (in minutes).
-tf = input.int(15, title="Target Timeframe (minutes)", minval=1)
+// Input group for Basic Settings
+group_basic = "Basic Settings"
+tf = input.int(15, title="Target Timeframe (minutes)", minval=1, group=group_basic, tooltip="Select the higher timeframe in minutes to monitor")
 // Get the current chart timeframe in minutes.
 current_tf = timeframe.in_seconds(timeframe.period) / 60
 // Calculate 'cansize': the number of current bars that make up one higher timeframe bar.
 cansize = int(math.round(tf / current_tf))
 
-// User inputs for candle colors.
-green = input.color(color.green, title="Bullish Candle Color")
-red = input.color(color.red, title="Bearish Candle Color")
+// Input group for Candle Appearance
+group_candle = "Candle Appearance"
+green = input.color(#4caf8b40, title="Bullish Candle Color", group=group_candle, tooltip="Color for bullish candles")
+red = input.color(#ff945240, title="Bearish Candle Color", group=group_candle, tooltip="Color for bearish candles")
+Bu_Candle_Line = input.int(20, title="Bullish Candle Line Transparency", group=group_candle, tooltip="Transparency level for bullish candle borders (0-100)")
+Be_Candle_Line = input.int(20, title="Bearish Candle Line Transparency", group=group_candle, tooltip="Transparency level for bearish candle borders (0-100)")
 
+LineWidth = input.int(4, title="Shadows Width", minval=1, maxval=10, group=group_candle, tooltip="Width of the candle shadows (wicks)")
+
+// Input group for Volume Settings
+group_volume = "Volume Settings"
+volumecheck = input.bool(true, title="Show Box Volumes on Chart", group=group_volume, tooltip="Display volume-based boxes on the chart")
+showVolumePercent = input.bool(true, title="Show Volume Percentage", group=group_volume, tooltip="Display volume percentage below volume level")
+volumePercentColor = input.color(color.rgb(255, 255, 255, 20), title="Volume Percentage Color", group=group_volume, tooltip="Color of the volume percentage text")
+volumePercentSize = input.string("small", title="Volume Percentage Size", options=["tiny", "small", "normal", "large", "huge"], group=group_volume, tooltip="Size of the volume percentage text")
 
 // =============================================================================
 // SECTION 2: CANDLE VALUES CALCULATION
 // =============================================================================
-// This section calculates the OHLC values for the defined group of candles.
+// This section calculates the OHLC values for the defined group of candles and volume calculations.
 
+// Calculate the highest high and lowest low for the grouped candles
 highs = ta.highest(high, cansize)
 lows = ta.lowest(low, cansize)
+// Get the opening price of the first bar in the group (cansize bars ago)
 opens = open[cansize]
+// Get the closing price of the current bar (last bar in the group)
 closes = close
 
+// Volume calculation function
+// This function calculates the volume-based height relative to candle body height and percentage
+// The volume is normalized against the highest volume in the last 500 bars
+volfunc(t,b,v)=>
+    // Calculate the height of the candle body
+    canheight = t - b
+    // Find the highest volume in the last 500 bars for normalization
+    tv = ta.highest(v, 500)
+    // Calculate the volume-based height relative to candle height
+    vol = canheight * v / tv
+    // Calculate volume percentage (0-100)
+    volper = v * 100 / tv
+    [vol, volper]
 
 // =============================================================================
 // SECTION 3: DRAWING LOGIC
@@ -45,12 +72,19 @@ is_group = (bar_index) % cansize == 0
 // If the condition to draw is met, plot the candle.
 if is_group
     // --- A. Determine color and body coordinates ---
-    growth = closes >= opens ? true : false
-    colors = growth ? green : red
-    top = growth ? closes : opens
-    bottom = growth ? opens : closes
+    // Determine if the candle closes above or at the same level as it opens (bullish or neutral)
+    bullish = closes >= opens
+    colors = bullish ? green : red
+    lineTr = bullish ? Bu_Candle_Line : Be_Candle_Line
+    top = bullish ? closes : opens
+    bottom = bullish ? opens : closes
     left = bar_index[cansize]
     right = bar_index
+
+    // Calculate volume data for the grouped candles
+    BigVolume = math.sum(volume, cansize)
+    [volumeLevel, VolumePercent] = volfunc(top, bottom, BigVolume)
+    volumeLevelon = volumeLevel + bottom
 
     // --- B. Determine wick coordinates ---
     Ux1 = math.round(math.avg(left, right))
@@ -70,29 +104,63 @@ if is_group
          top=top, 
          right=right, 
          bottom=bottom, 
-         bgcolor=color.new(colors, 70), 
-         border_color=colors,
+         bgcolor= colors, 
+         border_color=color.new(colors, lineTr),
          border_width=1
      )
+
+    // Draw the volume box overlay
+    volumeBox = box.new(
+         left=left, 
+         top=volumeLevelon, 
+         right=right, 
+         bottom=bottom, 
+         bgcolor= volumecheck ? color.new(colors, input(70, title = "Volume Color", group=group_volume, tooltip="Transparency level for volume box color")) : #ffffff00,
+         border_color=#ffffff00
+     )
+    
+    // Draw volume percentage text below the volume level
+    if showVolumePercent and volumecheck
+        // Calculate text size
+        textSize = volumePercentSize == "tiny" ? size.tiny : 
+                  volumePercentSize == "small" ? size.small : 
+                  volumePercentSize == "normal" ? size.normal : 
+                  volumePercentSize == "large" ? size.large : size.huge
+        
+        // Position the text slightly below the volume level
+        textY = volumeLevelon - (top - bottom) * 0.1  // 10% of candle height below volume level
+        
+        label.new(
+             x = math.round(math.avg(left, right)),
+             y = textY,
+             text = str.tostring(math.round(VolumePercent, 1)) + "%",
+             style = label.style_none,
+             color = color.new(#ffffff, 100),
+             textcolor = volumePercentColor,
+             size = textSize
+         )
     
     // Draw the upper wick if necessary.
     if highs > top
-        line.new(
+        upperWickLine = line.new(
              x1=Ux1, 
              y1=Uy1, 
              x2=Ux2, 
              y2=Uy2, 
-             color=colors, 
-             width=1
+             color=color.new(colors, lineTr),
+             style= line.style_solid,
+             width=LineWidth
          )
+
     
     // Draw the lower wick if necessary.
     if lows < bottom
-        line.new(
+        lowerWickLine = line.new(
              x1=Dx1, 
              y1=Dy1, 
              x2=Dx2, 
              y2=Dy2, 
-             color=colors, 
-             width=1
+             color=color.new(colors, lineTr), 
+             style= line.style_solid,
+             width=LineWidth
          )
